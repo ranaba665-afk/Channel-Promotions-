@@ -1,0 +1,93 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PromoHub - YouTube Promotion</title>
+<style>
+:root{--bg:#eef1f6;--ink:#16213a;--card:#fff;--acc:#d62839;--mut:#667089;--ok:#1b8a5a;--line:#dde2ec}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Noto Sans Bengali",system-ui,sans-serif;padding-bottom:70px}
+header{background:var(--ink);color:#fff;padding:14px 16px;display:flex;justify-content:space-between;align-items:center}
+header b{font-size:18px}main{max-width:620px;margin:0 auto;padding:14px}
+.c{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+input,select{width:100%;padding:10px;margin:5px 0 9px;border:1px solid var(--line);border-radius:8px;font:inherit}
+button{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:10px 14px;font:inherit;cursor:pointer}
+button.g{background:#e6e9f1;color:var(--ink)}button:disabled{opacity:.5}
+.bal{display:flex;gap:10px}.bal div{flex:1;background:var(--ink);color:#fff;border-radius:10px;padding:12px}.bal small{opacity:.7;display:block}.bal b{font-size:22px}
+nav{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);display:flex}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;padding:14px 4px}nav button.on{color:var(--acc);font-weight:700;box-shadow:inset 0 3px 0 var(--acc)}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}.mut{color:var(--mut);font-size:13px}
+a{color:var(--acc);word-break:break-all}#msg{position:fixed;top:60px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:20px;display:none;z-index:9;max-width:90%}
+</style></head><body>
+<header><b>PromoHub</b><span id="top"></span></header><main id="app"></main><div id="msg"></div><nav id="nav"></nav>
+<script type="module">
+import{initializeApp}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import{getAuth,onAuthStateChanged,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+import{getFirestore,doc,getDoc,setDoc,addDoc,collection,query,where,getDocs,runTransaction,updateDoc,increment,serverTimestamp}from"https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+/* ====== Fill in your details here ====== */
+const FB={apiKey:"AIzaSyCdZtSAxQh1BT_jwPO4RjWsAHlWGsJlB5c",authDomain:"yoto-8b2dd.firebaseapp.com",projectId:"yoto-8b2dd",storageBucket:"yoto-8b2dd.firebasestorage.app",messagingSenderId:"662640401504",appId:"1:662640401504:web:3e52974c7f4b4930aef705"};
+const CLOUD="dhtr4zo4",PRESET="screenshots";            // Cloudinary cloud name + unsigned upload preset
+const ADMIN="ranabagdi467@gmail.com";       // admin email
+const UPI="ranabagdi467@oksbi";            // UPI ID to receive payments
+const EARN=0.5,PRICE=1,MINW=100,MAXW=1000; // earning per task, promoter cost per task, withdrawal limits
+/* =================================== */
+
+const db=getFirestore(initializeApp(FB)),au=getAuth();
+let me=null,u=null,tab="tasks";
+const $=s=>document.querySelector(s),L=s=>s.docs.map(d=>({id:d.id,...d.data()}));
+const Q=(c,f,v)=>getDocs(query(collection(db,c),where(f,"==",v)));
+const toast=t=>{const m=$("#msg");m.textContent=t;m.style.display="block";setTimeout(()=>m.style.display="none",2800)};
+const inr=n=>"₹"+(+n).toFixed(2).replace(/\.00$/,"");
+async function up(f){const fd=new FormData();fd.append("file",f);fd.append("upload_preset",PRESET);
+ const r=await fetch(`https://api.cloudinary.com/v1_1/${CLOUD}/image/upload`,{method:"POST",body:fd});const j=await r.json();if(!j.secure_url)throw Error("Upload failed");return j.secure_url}
+const act=fn=>async(...a)=>{try{await fn(...a);await load()}catch(e){toast(e.message||"Something went wrong")}};
+
+onAuthStateChanged(au,async x=>{me=x;if(x){const r=doc(db,"users",x.uid);let s=await getDoc(r);
+ if(!s.exists()){await setDoc(r,{email:x.email,deposit:0,earned:0,at:serverTimestamp()})}}await load()});
+
+async function load(){
+ if(!me){$("#nav").innerHTML="";$("#top").innerHTML="";return $("#app").innerHTML=`<div class="c"><h3>Log in / Sign up</h3><input id="e" type="email" placeholder="Email"><input id="p" type="password" placeholder="Password (6+ characters)"><div class="row"><button onclick="login()">Log in</button><button class="g" onclick="signup()">Create account</button></div></div>`}
+ u=(await getDoc(doc(db,"users",me.uid))).data()||{deposit:0,earned:0};
+ $("#top").innerHTML=`<button class="g" onclick="out()">Log out</button>`;
+ const tabs=[["tasks","Tasks"],["promote","Promote"],["wallet","Wallet"]];if(me.email===ADMIN)tabs.push(["admin","Admin"]);
+ $("#nav").innerHTML=tabs.map(t=>`<button class="${t[0]==tab?"on":""}" onclick="go('${t[0]}')">${t[1]}</button>`).join("");
+ const bal=`<div class="bal c" style="padding:0;border:0;background:none"><div><small>Deposit (promotions only)</small><b>${inr(u.deposit)}</b></div><div><small>Earnings (withdrawable)</small><b>${inr(u.earned)}</b></div></div>`;
+ $("#app").innerHTML=bal+await views[tab]();
+}
+const views={
+async tasks(){const mine=new Set(L(await Q("submissions","uid",me.uid)).map(s=>s.cid));
+ const cs=L(await Q("campaigns","status","active")).filter(c=>c.owner!=me.uid&&!mine.has(c.id));
+ return `<h3>Do tasks, earn ${inr(EARN)} each</h3>`+(cs.map(c=>`<div class="c"><div class="row"><b>${c.kind}</b><span class="mut">${c.total-c.done} left</span></div><a href="${c.url}" target="_blank" rel="noopener">Open video / channel</a><p class="mut">Like, subscribe and watch, then upload a screenshot</p><input type="file" accept="image/*" id="f${c.id}"><button onclick="sub('${c.id}')">Submit screenshot</button></div>`).join("")||`<div class="c mut">No tasks available right now. Check back later.</div>`)},
+async promote(){const cs=L(await Q("campaigns","owner",me.uid));
+ return `<div class="c"><h3>New promotion (${inr(PRICE)} per task)</h3><input id="url" placeholder="YouTube link (video or channel)"><select id="kind"><option>Video (like + subscribe + views)</option><option>Channel (subscribe)</option></select><input id="qty" type="number" min="1" placeholder="How many do you want?"><select id="from"><option value="deposit">Pay from deposit</option><option value="earned">Pay from earnings</option></select><button onclick="mk()">Start promotion</button></div><h3>My promotions</h3>`+(cs.map(c=>`<div class="c row"><span>${c.kind}<br><span class="mut">${c.done}/${c.total} completed</span></span><b>${c.status}</b></div>`).join("")||`<div class="c mut">No promotions yet.</div>`)},
+async wallet(){return `<div class="c"><h3>Deposit</h3><p class="mut">Send money to ${UPI}, then enter the UTR and a screenshot.</p><input id="da" type="number" placeholder="Amount ₹"><input id="du" placeholder="UTR / transaction ID"><input id="df" type="file" accept="image/*"><button onclick="dep()">Submit</button></div>
+<div class="c"><h3>Withdraw</h3><p class="mut">From earnings only. Minimum ${inr(MINW)}, maximum ${inr(MAXW)}.</p><input id="wa" type="number" placeholder="Amount ₹"><input id="wu" placeholder="Your UPI ID"><button onclick="wd()">Request withdrawal</button></div>`},
+async admin(){const[s,d,w]=await Promise.all(["submissions","deposits","withdrawals"].map(c=>Q(c,"status","pending")));
+ const img=x=>x?`<a href="${x}" target="_blank">Screenshot</a>`:"";
+ return `<h3>Tasks (${s.size})</h3>`+L(s).map(x=>`<div class="c row"><span class="mut">${x.email}</span>${img(x.shot)}<span><button onclick="ap('s','${x.id}')">Approve</button> <button class="g" onclick="rj('submissions','${x.id}')">Reject</button></span></div>`).join("")
+ +`<h3>Deposits (${d.size})</h3>`+L(d).map(x=>`<div class="c row"><span>${x.email}<br><b>${inr(x.amount)}</b> <span class="mut">${x.utr}</span></span>${img(x.shot)}<span><button onclick="ap('d','${x.id}')">Approve</button> <button class="g" onclick="rj('deposits','${x.id}')">Reject</button></span></div>`).join("")
+ +`<h3>Withdrawals (${w.size})</h3>`+L(w).map(x=>`<div class="c row"><span>${x.email}<br><b>${inr(x.amount)}</b> → ${x.upi}</span><span><button onclick="ap('w','${x.id}')">Paid</button> <button class="g" onclick="ap('r','${x.id}')">Refund</button></span></div>`).join("")}
+};
+
+const E=(id)=>$("#"+id).value.trim();
+Object.assign(window,{
+go:t=>{tab=t;load()},out:()=>signOut(au),
+login:act(async()=>{await signInWithEmailAndPassword(au,E("e"),$("#p").value)}),
+signup:act(async()=>{await createUserWithEmailAndPassword(au,E("e"),$("#p").value)}),
+sub:act(async cid=>{const f=$("#f"+cid).files[0];if(!f)throw Error("Choose a screenshot");const shot=await up(f);
+ await addDoc(collection(db,"submissions"),{cid,uid:me.uid,email:me.email,shot,status:"pending",at:serverTimestamp()});toast("Submitted. Admin will review it.")}),
+mk:act(async()=>{const url=E("url"),qty=parseInt($("#qty").value),from=$("#from").value,kind=$("#kind").value;
+ if(!/^https?:\/\/(www\.|m\.)?(youtube\.com|youtu\.be)/.test(url))throw Error("Enter a valid YouTube link");if(!(qty>0))throw Error("Enter a quantity");
+ const cost=qty*PRICE;await runTransaction(db,async tx=>{const r=doc(db,"users",me.uid),s=await tx.get(r);if(s.data()[from]<cost)throw Error("Insufficient balance, need "+inr(cost));
+  tx.update(r,{[from]:increment(-cost)});tx.set(doc(collection(db,"campaigns")),{owner:me.uid,url,kind,total:qty,done:0,status:"active",at:serverTimestamp()})});toast("Promotion started")}),
+dep:act(async()=>{const amount=+E("da"),utr=E("du"),f=$("#df").files[0];if(!(amount>0)||!utr)throw Error("Enter amount and UTR");
+ const shot=f?await up(f):"";await addDoc(collection(db,"deposits"),{uid:me.uid,email:me.email,amount,utr,shot,status:"pending",at:serverTimestamp()});toast("Deposit request submitted")}),
+wd:act(async()=>{const amount=+E("wa"),upi=E("wu");if(amount<MINW||amount>MAXW)throw Error(`Enter an amount between ${MINW} and ${MAXW}`);if(!upi)throw Error("Enter your UPI ID");
+ await runTransaction(db,async tx=>{const r=doc(db,"users",me.uid),s=await tx.get(r);if(s.data().earned<amount)throw Error("Insufficient earnings");
+  tx.update(r,{earned:increment(-amount)});tx.set(doc(collection(db,"withdrawals")),{uid:me.uid,email:me.email,amount,upi,status:"pending",at:serverTimestamp()})});toast("Withdrawal request submitted")}),
+rj:act(async(c,id)=>{await updateDoc(doc(db,c,id),{status:"rejected"})}),
+ap:act(async(k,id)=>{if(me.email!==ADMIN)return;const col={s:"submissions",d:"deposits",w:"withdrawals",r:"withdrawals"}[k];
+ await runTransaction(db,async tx=>{const r=doc(db,col,id),x=await tx.get(r);if(x.data().status!="pending")return;const d=x.data();
+  if(k=="s"){const cr=doc(db,"campaigns",d.cid),c=await tx.get(cr);if(c.data().done>=c.data().total){tx.update(r,{status:"rejected"});return}
+   const n=c.data().done+1;tx.update(r,{status:"approved"});tx.update(cr,{done:n,status:n>=c.data().total?"done":"active"});tx.update(doc(db,"users",d.uid),{earned:increment(EARN)})}
+  else if(k=="d"){tx.update(r,{status:"approved"});tx.update(doc(db,"users",d.uid),{deposit:increment(d.amount)})}
+  else if(k=="w")tx.update(r,{status:"paid"});
+  else{tx.update(r,{status:"refunded"});tx.update(doc(db,"users",d.uid),{earned:increment(d.amount)})}})})
+});
+</script></body></html>
